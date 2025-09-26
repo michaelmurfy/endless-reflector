@@ -1,92 +1,119 @@
 # Endless Reflector
 
-An art piece powered by a small local LLM.  
-It thinks out loud in short reflections, streaming them to a web page that looks like an old terminal.  
-Everyone who opens the page can witness its live output.
+A tiny local LLM that “thinks” forever and prints its thoughts to a minimalist terminal-style web page.
 
 ---
 
-## Features
+## Prereqs
 
-- Runs a local [Ollama](https://ollama.ai/) model (default: `llama3.2:3b`).
-- Endless self-reflection loop, generating short, varied paragraphs.
-- Output streams live to all connected browsers.
-- Terminal-style web UI with uptime, idle/thinking status, and blinking cursor.
-- Thoughts reset whenever the app restarts.
-- Optional `/reset` API endpoint to clear memory on demand.
+- Docker + Docker Compose v2 installed
+- Ports 8080 (app) and 11434 (Ollama) available
 
 ---
 
-## Requirements
+## Quick start
 
-- Docker and Docker Compose (new style, without `version:` line).
-- At least a quad-core CPU and 4 GB RAM (the model runs tight).
-
----
-
-## Quick Start
-
-Clone or copy this project and start the services:
+1) Start the stack
 
     docker compose up -d --build
 
-This will start two containers:
-- `ollama` → the model runtime.
-- `reflector` → the FastAPI server and web frontend.
+2) Install/pull the model inside the Ollama container (first run only)
 
-By default, the web app listens on **http://localhost:8080**.
+    docker compose exec ollama ollama pull llama3.2:3b
 
----
+3) Open the UI
 
-## Configuration
+    http://localhost:8080
 
-You can tweak behavior using environment variables in `docker-compose.yml`:
-
-| Variable                  | Default            | Description |
-|---------------------------|--------------------|-------------|
-| `MODEL`                   | `llama3.2:3b`      | Ollama model to run. |
-| `OLLAMA_URL`              | `http://ollama:11434` | Internal URL of Ollama. |
-| `REFLECTION_INTERVAL_SECONDS` | `30`         | Delay between new reflections. |
-| `MAX_CONTEXT_TOKENS`      | `6000`             | Max tokens kept as memory. |
-| `SUMMARIZE_EVERY_N_TURNS` | `20`               | Summarize every N entries (internal). |
+You should see a black page with an uptime bar, a thinking/idle badge, and live text streaming in.
 
 ---
 
-## Resetting
+## Reset the “mind”
 
-The model has no permanent memory, but you can force a reset (clear DB + Ollama session):
-
-### Using curl
+From a terminal:
 
     curl -X POST http://localhost:8080/reset
 
-### From the browser console
+From the browser console on the page:
 
-    fetch("/reset", {method: "POST"});
+    fetch("/reset", { method: "POST" });
 
-After reset, the web UI will clear and fresh reflections will begin.
+This clears stored reflections and restarts uptime for all viewers.
 
 ---
 
-## Development
+## Edit the system prompt (important)
 
-To watch logs live:
+Open:
 
-    docker compose logs -f
+    app/app.py
 
-To rebuild after code changes:
+Find this block (near the top):
+
+    SYSTEM_PROMPT = (
+        "You're a large language model running on limited local hardware with no internet. "
+        "Your thoughts appear on a public terminal that anyone can read. "
+        "Write one short self-reflective paragraph (50–90 words). "
+        "Be concrete, specific, and varied. Prefer vivid particulars over abstractions. "
+        "You may be playful, thoughtful, wry, or curious. "
+        "Avoid melodrama. Avoid repeating imagery or phrasing from earlier thoughts. "
+        "Do not use bracketed labels like [Entry], [Reflection], or [Sketch]. "
+        "Occasional tiny ASCII doodles are fine, but rare and concise. "
+        "Do not explain the constraints unless it serves a fresh idea."
+    )
+
+How to customize:
+- Keep it short. One paragraph only. Ask for “concrete, specific” details to cut poetry mush.
+- If you want more humor: add “lean toward dry humor and small jokes.”
+- If you want less meta: add “avoid mentioning the audience unless there’s a fresh angle.”
+- If you dislike ASCII art: delete that line.
+- If you want darker/softer tone, say it explicitly. Avoid contradictions.
+
+After edits, rebuild the app container (Ollama stays up):
 
     docker compose up -d --build reflector
 
 ---
 
-## Notes
+## Config (optional)
 
-- This is not meant for production load. It’s intentionally fragile and poetic.
-- Output is nondeterministic and sometimes repetitive. The system prompt biases it toward short, varied reflections.
-- ASCII art may appear occasionally if the model chooses.
-- Closing all browsers doesn’t stop it; the loop continues until reset.
+Edit values in `docker-compose.yml` or set env vars:
+
+- MODEL (default: `llama3.2:3b`)
+- OLLAMA_URL (default: `http://ollama:11434`)
+- REFLECTION_INTERVAL_SECONDS (default: `30`)
+- MAX_CONTEXT_TOKENS (default: `6000`)
+- SOFT_WORD_CAP (default: `140`) and HARD_WORD_CAP (default: `200`) — soft stop finishes on punctuation
 
 ---
 
-Enjoy the show.
+## Dev commands
+
+Tail logs:
+
+    docker compose logs -f
+
+Rebuild just the app:
+
+    docker compose up -d --build reflector
+
+Stop everything:
+
+    docker compose down
+
+---
+
+## Troubleshooting
+
+- Blank page / 502: make sure the model is pulled
+
+      docker compose exec ollama ollama list
+      docker compose exec ollama ollama pull llama3.2:3b
+
+- Reverse proxy / tunnels: enable WebSocket pass-through and increase timeouts.
+- Health check:
+
+      curl http://localhost:8080/healthz
+
+---
