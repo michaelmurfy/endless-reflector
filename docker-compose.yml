@@ -1,0 +1,48 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  app:
+    build: ./app
+    container_name: reflector
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      - MODEL=llama3.2:3b
+      - OLLAMA_URL=http://ollama:11434
+      - REFLECTION_INTERVAL_SECONDS=30
+      - MAX_CONTEXT_TOKENS=6000
+      - SUMMARIZE_EVERY_N_TURNS=20
+      - DB_PATH=/data/reflector.sqlite3
+      - BANNED_WORDS=suicide,terrorism,explosives,how to make a bomb
+      - SUBSCRIBER_LIMIT=1000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/healthz').read()"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    volumes:
+      - data:/data
+
+volumes:
+  ollama:
+  data:

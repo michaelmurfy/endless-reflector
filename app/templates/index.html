@@ -1,0 +1,154 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Endless Reflector</title>
+  <link rel="stylesheet" href="/static/styles.css?v=4" />
+</head>
+<body>
+  <div id="uptime" aria-live="polite">
+    <span>uptime</span>
+    <strong id="uptime-value">00:00:00</strong>
+    <span id="status" class="status idle" aria-live="polite" aria-atomic="true">idle</span>
+  </div>
+
+  <main>
+    <pre id="log" aria-label="reflections console"></pre>
+  </main>
+
+  <script>
+    // values injected by backend
+    let STARTED_AT = {{ started_at | tojson }};
+    const entries = {{ rows | tojson }};
+
+    const logEl = document.getElementById('log');
+
+    // persistent cursor
+    const cursorEl = document.createElement('span');
+    cursorEl.id = 'cursor';
+    cursorEl.className = 'cursor';
+    logEl.append(cursorEl);
+
+    function appendText(text){
+      const node = document.createTextNode(text);
+      logEl.insertBefore(node, cursorEl);
+    }
+
+    function ensureCursorOnOwnLine(){
+      const txt = logEl.textContent || "";
+      if (!txt.endsWith("\n")) appendText("\n");
+    }
+
+    // render history
+    for (const row of entries){
+      appendText(`\n${row.ts}\n${row.content}\n\n`);
+    }
+    ensureCursorOnOwnLine();
+
+    // uptime
+    const upEl = document.getElementById('uptime-value');
+    function fmt(n){ return String(n).padStart(2,'0'); }
+    function tickUptime(){
+      const start = new Date(STARTED_AT).getTime();
+      const now = Date.now();
+      let s = Math.max(0, Math.floor((now - start)/1000));
+      const h = Math.floor(s/3600); s -= h*3600;
+      const m = Math.floor(s/60); s -= m*60;
+      upEl.textContent = `${fmt(h)}:${fmt(m)}:${fmt(s)}`;
+    }
+    tickUptime();
+    setInterval(tickUptime, 1000);
+
+    // status handling
+    const statusEl = document.getElementById('status');
+    let isTyping = false;
+    let idleTimer = null;
+
+    function setStatusThinking(){
+      isTyping = true;
+      statusEl.textContent = 'thinking';
+      statusEl.classList.remove('idle');
+      statusEl.classList.add('thinking');
+      cursorEl.classList.add('on'); // solid while thinking
+    }
+    function setStatusIdle(){
+      isTyping = false;
+      statusEl.textContent = 'idle';
+      statusEl.classList.remove('thinking');
+      statusEl.classList.add('idle');
+      ensureCursorOnOwnLine();
+    }
+
+    function bumpTyping(){
+      setStatusThinking();
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(setStatusIdle, 900);
+    }
+
+    // blinking cursor loop
+    setInterval(() => {
+      if (isTyping) cursorEl.classList.add('on');
+      else cursorEl.classList.toggle('on');
+    }, 600);
+
+    function heartbeat(){
+      const upbox = document.getElementById('uptime');
+      upbox.classList.remove('heartbeat'); void upbox.offsetWidth; upbox.classList.add('heartbeat');
+    }
+
+    function clearOutput(){
+      logEl.textContent = '';
+      logEl.append(cursorEl);
+      ensureCursorOnOwnLine();
+    }
+
+    // websocket
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}/ws`);
+    let justStarted = false;
+
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.t === 'ping') return;
+
+      if (msg.t === 'status') {
+        if (msg.v === 'thinking') setStatusThinking();
+        else if (msg.v === 'idle') setStatusIdle();
+        return;
+      }
+
+      if (msg.t === 'reset') {
+        clearOutput();
+        if (msg.started_at) {
+          STARTED_AT = msg.started_at;
+          tickUptime();
+        }
+        setStatusIdle();
+        return;
+      }
+
+      if (msg.t === 'start') {
+        appendText(`\n${msg.ts}\n`);
+        justStarted = true;
+        bumpTyping();
+      } else if (msg.t === 'token') {
+        appendText(msg.token);
+        bumpTyping();
+      } else if (msg.t === 'end') {
+        appendText("\n\n"); // spacer
+        setStatusIdle();
+      }
+
+      heartbeat();
+      window.scrollTo({ top: document.body.scrollHeight, behavior: justStarted ? 'auto' : 'smooth' });
+      justStarted = false;
+    };
+
+    ws.onclose = () => setTimeout(() => location.reload(), 2000);
+
+    // optional: reset from console
+    // fetch("/reset",{method:"POST"})
+  </script>
+</body>
+</html>
